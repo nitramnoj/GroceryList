@@ -164,11 +164,28 @@ function App() {
       .maybeSingle()
 
     if (error) {
+      const cached = localStorage.getItem('currentList')
+
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached)
+          setCurrentList(parsed)
+          setError('Offline mode: showing last saved list.')
+          if (parsed?.id) {
+            await loadListItems(parsed.id)
+          }
+          return
+        } catch {
+          // ignore parse errors
+        }
+      }
+
       setError(`Error loading current list: ${error.message}`)
       return
     }
 
     setCurrentList(data)
+    localStorage.setItem('currentList', JSON.stringify(data))
     setError(null)
 
     if (data) {
@@ -241,11 +258,24 @@ function App() {
       .order('name', { ascending: true })
 
     if (error) {
+      const cached = localStorage.getItem('categories')
+
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached)
+          setCategories(parsed)
+          setEditMessage('Offline mode: showing last saved categories.')
+          return
+        } catch {
+          // ignore parse errors
+        }
+      }
+
       setEditMessage(`Error loading categories: ${error.message}`)
       return
     }
 
-    setCategories(
+    const processedCategories =
       (data || []).map((category) => ({
         ...category,
         draftName: category.name ?? '',
@@ -254,7 +284,9 @@ function App() {
             ? ''
             : String(category.sort_order),
       }))
-    )
+
+    setCategories(processedCategories)
+    localStorage.setItem('categories', JSON.stringify(processedCategories))
   }
 
   async function loadAllItems() {
@@ -270,11 +302,24 @@ function App() {
       `)
 
     if (error) {
+      const cached = localStorage.getItem('allItems')
+
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached)
+          setAllItems(parsed)
+          setEditMessage('Offline mode: showing last saved items.')
+          return
+        } catch {
+          // ignore parse errors
+        }
+      }
+
       setEditMessage(`Error loading items: ${error.message}`)
       return
     }
 
-    setAllItems(
+    const processedItems =
       (data || []).map((item) => ({
         ...item,
         draftName: item.name ?? '',
@@ -284,7 +329,9 @@ function App() {
             : String(item.category_id),
         draftRegular: !!item.regular,
       }))
-    )
+
+    setAllItems(processedItems)
+    localStorage.setItem('allItems', JSON.stringify(processedItems))
   }
 
   async function refreshReferenceData() {

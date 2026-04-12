@@ -17,7 +17,9 @@ export default defineConfig({
         theme_color: '#ffffff',
         background_color: '#ffffff',
         display: 'standalone',
-        start_url: '/',
+        start_url: '/GroceryList/',
+        scope: '/GroceryList/',
+        id: '/GroceryList/',
         icons: [
           {
             src: '/favicon.svg',

@@ -7,6 +7,20 @@ import UnavailableItems from './UnavailableItems'
 import CurrentList from './CurrentList'
 import RegularsPanel from './RegularsPanel'
 
+const OFFLINE_QUEUE_KEY = 'offlineQueue'
+
+function addToOfflineQueue(action) {
+  const existing = localStorage.getItem(OFFLINE_QUEUE_KEY)
+  const queue = existing ? JSON.parse(existing) : []
+
+  queue.push({
+    ...action,
+    id: Date.now(),
+  })
+
+  localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue))
+}
+
 function App() {
   const [session, setSession] = useState(null)
   const [error, setError] = useState(null)
@@ -686,19 +700,52 @@ function App() {
     setAddItemLoading(true)
     setAddItemMessage(null)
 
-    const { error } = await supabase.from('shopping_list_items').insert({
+    const newItem = {
       shopping_list_id: currentList.id,
       item_id: Number(addItemId),
       quantity_required: quantityNumber,
       quantity_bought: 0,
       note: null,
       unavailable: false,
-    })
+    }
+
+    const { error } = await supabase
+      .from('shopping_list_items')
+      .insert(newItem)
 
     setAddItemLoading(false)
 
     if (error) {
-      setAddItemMessage(`Error adding item: ${error.message}`)
+      const addedItem = allItems.find(
+        (item) => String(item.id) === String(addItemId)
+      )
+
+      const localItem = {
+        id: Date.now(),
+        item_id: newItem.item_id,
+        quantity_required: newItem.quantity_required,
+        quantity_bought: 0,
+        note: null,
+        unavailable: false,
+        items: {
+          name: addedItem?.name || 'Item',
+          category_id: addedItem?.category_id ?? null,
+        },
+        draftQuantity: String(newItem.quantity_required),
+      }
+
+      const updatedList = [...listItems, localItem]
+      setListItems(updatedList)
+      localStorage.setItem('listItems', JSON.stringify(updatedList))
+
+      addToOfflineQueue({
+        type: 'ADD_ITEM',
+        payload: newItem,
+      })
+
+      setAddItemMessage('Offline: item added locally and queued for sync.')
+      setAddItemId('')
+      setAddQuantity('1')
       return
     }
 

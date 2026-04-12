@@ -709,13 +709,21 @@ function App() {
       unavailable: false,
     }
 
-    const { error } = await supabase
-      .from('shopping_list_items')
-      .insert(newItem)
+    try {
+      const { error } = await supabase
+        .from('shopping_list_items')
+        .insert(newItem)
 
-    setAddItemLoading(false)
+      setAddItemLoading(false)
 
-    if (error) {
+      if (error) {
+        throw error
+      }
+
+      await loadListItems(currentList.id)
+    } catch (_error) {
+      setAddItemLoading(false)
+
       const addedItem = allItems.find(
         (item) => String(item.id) === String(addItemId)
       )
@@ -728,6 +736,7 @@ function App() {
         note: null,
         unavailable: false,
         items: {
+          id: addedItem?.id ?? newItem.item_id,
           name: addedItem?.name || 'Item',
           category_id: addedItem?.category_id ?? null,
         },
@@ -748,8 +757,6 @@ function App() {
       setAddQuantity('1')
       return
     }
-
-    await loadListItems(currentList.id)
 
     const addedItem = allItems.find((item) => String(item.id) === String(addItemId))
     setAddItemMessage(

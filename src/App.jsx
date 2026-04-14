@@ -1790,14 +1790,43 @@ function App() {
               font-size: 24px;
             }
 
+            .print-toolbar {
+              position: sticky;
+              top: 0;
+              display: flex;
+              gap: 12px;
+              margin: -24px -24px 24px -24px;
+              padding: 16px 24px;
+              background: #fff;
+              border-bottom: 1px solid #ccc;
+            }
+
+            .print-toolbar button {
+              min-height: 44px;
+              padding: 10px 16px;
+              font-size: 16px;
+              border: 1px solid #999;
+              border-radius: 8px;
+              background: #f5f5f5;
+              cursor: pointer;
+            }
+
             @media print {
               body {
                 padding: 0;
+              }
+
+              .print-toolbar {
+                display: none;
               }
             }
           </style>
         </head>
         <body>
+          <div class="print-toolbar">
+            <button type="button" onclick="window.print()">Print</button>
+            <button type="button" onclick="window.close()">Close</button>
+          </div>
           <h1>${currentList.name || 'Shopping List'}</h1>
           ${groupedHtml || '<p>No items in this list.</p>'}
         </body>
@@ -1805,7 +1834,6 @@ function App() {
     `)
     printWindow.document.close()
     printWindow.focus()
-    printWindow.print()
   }
 
   const categoryMap = useMemo(() => {

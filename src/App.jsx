@@ -222,7 +222,7 @@ function App() {
 
       setCurrentList(cachedList)
       setListItems(Array.isArray(cachedItems) ? cachedItems : [])
-      setError(cachedList ? 'Offline mode: showing last saved list.' : null)
+      setError(null)
       return
     }
 
@@ -253,7 +253,7 @@ function App() {
 
       setCurrentList(cachedList)
       setListItems(Array.isArray(cachedItems) ? cachedItems : [])
-      setError(cachedList ? 'Offline mode: showing last saved list.' : 'Unable to load shopping list.')
+      setError(null)
     }
   }
 
@@ -302,7 +302,7 @@ function App() {
     } catch {
       const cachedItems = readCachedJson(CACHE_KEYS.listItems, [])
       setListItems(Array.isArray(cachedItems) ? cachedItems : [])
-      setError('Offline mode: showing last saved list.')
+      setError(null)
     }
   }
 

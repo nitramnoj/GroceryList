@@ -761,8 +761,8 @@ function App() {
     const addedItem = allItems.find((item) => String(item.id) === String(addItemId))
     setAddItemMessage(
       addedItem
-        ? `"${addedItem.name}" added to the list.`
-        : 'Item added to the list.'
+        ? `SUCCESS PATH HIT 54321 - "${addedItem.name}" added to the list.`
+        : 'SUCCESS PATH HIT 54321 - Item added to the list.'
     )
     setAddItemId('')
     setAddQuantity('1')

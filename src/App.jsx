@@ -171,13 +171,27 @@ function App() {
   }, [allItems, listItems])
 
   async function loadCurrentList() {
-    const { data, error } = await supabase
-      .from('shopping_lists')
-      .select('*')
-      .eq('is_current', true)
-      .maybeSingle()
+    try {
+      const { data, error } = await supabase
+        .from('shopping_lists')
+        .select('*')
+        .eq('is_current', true)
+        .maybeSingle()
 
-    if (error) {
+      if (error) {
+        throw error
+      }
+
+      setCurrentList(data)
+      localStorage.setItem('currentList', JSON.stringify(data))
+      setError(null)
+
+      if (data) {
+        await loadListItems(data.id)
+      } else {
+        setListItems([])
+      }
+    } catch (_error) {
       const cached = localStorage.getItem('currentList')
 
       if (cached) {
@@ -194,18 +208,7 @@ function App() {
         }
       }
 
-      setError(`Error loading current list: ${error.message}`)
-      return
-    }
-
-    setCurrentList(data)
-    localStorage.setItem('currentList', JSON.stringify(data))
-    setError(null)
-
-    if (data) {
-      await loadListItems(data.id)
-    } else {
-      setListItems([])
+      setError('Offline and no cached current list available.')
     }
   }
 

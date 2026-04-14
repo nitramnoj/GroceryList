@@ -210,25 +210,42 @@ function App() {
   }
 
   async function loadListItems(shoppingListId) {
-    const { data, error } = await supabase
-      .from('shopping_list_items')
-      .select(`
-        id,
-        item_id,
-        quantity_required,
-        quantity_bought,
-        note,
-        unavailable,
-        items (
+    try {
+      const { data, error } = await supabase
+        .from('shopping_list_items')
+        .select(`
           id,
-          name,
-          category_id
-        )
-      `)
-      .eq('shopping_list_id', shoppingListId)
-      .order('id', { ascending: true })
+          item_id,
+          quantity_required,
+          quantity_bought,
+          note,
+          unavailable,
+          items (
+            id,
+            name,
+            category_id
+          )
+        `)
+        .eq('shopping_list_id', shoppingListId)
+        .order('id', { ascending: true })
 
-    if (error) {
+      if (error) {
+        throw error
+      }
+
+      const processedItems =
+        (data || []).map((item) => ({
+          ...item,
+          draftQuantity:
+            item.quantity_required === null || item.quantity_required === undefined
+              ? ''
+              : String(item.quantity_required),
+        }))
+
+      setListItems(processedItems)
+      localStorage.setItem('listItems', JSON.stringify(processedItems))
+      setError(null)
+    } catch (_error) {
       const cached = localStorage.getItem('listItems')
 
       if (cached) {
@@ -242,22 +259,8 @@ function App() {
         }
       }
 
-      setError(`Error loading list items: ${error.message}`)
-      return
+      setError('Offline and no cached list available.')
     }
-
-    const processedItems =
-      (data || []).map((item) => ({
-        ...item,
-        draftQuantity:
-          item.quantity_required === null || item.quantity_required === undefined
-            ? ''
-            : String(item.quantity_required),
-      }))
-
-    setListItems(processedItems)
-    localStorage.setItem('listItems', JSON.stringify(processedItems))
-    setError(null)
   }
 
   async function loadCategories() {

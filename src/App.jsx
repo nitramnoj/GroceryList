@@ -709,6 +709,29 @@ function App() {
       unavailable: false,
     }
 
+    const addedItem = allItems.find(
+      (item) => String(item.id) === String(addItemId)
+    )
+
+    const localItem = {
+      id: Date.now(),
+      item_id: newItem.item_id,
+      quantity_required: newItem.quantity_required,
+      quantity_bought: 0,
+      note: null,
+      unavailable: false,
+      items: {
+        id: addedItem?.id ?? newItem.item_id,
+        name: addedItem?.name || 'Item',
+        category_id: addedItem?.category_id ?? null,
+      },
+      draftQuantity: String(newItem.quantity_required),
+    }
+
+    const updatedList = [...listItems, localItem]
+    setListItems(updatedList)
+    localStorage.setItem('listItems', JSON.stringify(updatedList))
+
     try {
       const { error } = await supabase
         .from('shopping_list_items')
@@ -720,52 +743,27 @@ function App() {
         throw error
       }
 
-      await loadListItems(currentList.id)
+      setAddItemMessage(
+        addedItem
+          ? `"${addedItem.name}" added to the list.`
+          : 'Item added to the list.'
+      )
+      setAddItemId('')
+      setAddQuantity('1')
+      return
     } catch (_error) {
       setAddItemLoading(false)
-
-      const addedItem = allItems.find(
-        (item) => String(item.id) === String(addItemId)
-      )
-
-      const localItem = {
-        id: Date.now(),
-        item_id: newItem.item_id,
-        quantity_required: newItem.quantity_required,
-        quantity_bought: 0,
-        note: null,
-        unavailable: false,
-        items: {
-          id: addedItem?.id ?? newItem.item_id,
-          name: addedItem?.name || 'Item',
-          category_id: addedItem?.category_id ?? null,
-        },
-        draftQuantity: String(newItem.quantity_required),
-      }
-
-      const updatedList = [...listItems, localItem]
-      setListItems(updatedList)
-      localStorage.setItem('listItems', JSON.stringify(updatedList))
 
       addToOfflineQueue({
         type: 'ADD_ITEM',
         payload: newItem,
       })
 
-      setAddItemMessage('CATCH PATH HIT 12345')
+      setAddItemMessage('Offline: item added locally and queued for sync.')
       setAddItemId('')
       setAddQuantity('1')
       return
     }
-
-    const addedItem = allItems.find((item) => String(item.id) === String(addItemId))
-    setAddItemMessage(
-      addedItem
-        ? `SUCCESS PATH HIT 54321 - "${addedItem.name}" added to the list.`
-        : 'SUCCESS PATH HIT 54321 - Item added to the list.'
-    )
-    setAddItemId('')
-    setAddQuantity('1')
   }
 
   async function handleQuickCreateItem(e) {

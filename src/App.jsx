@@ -7,22 +7,33 @@ import UnavailableItems from './UnavailableItems'
 import CurrentList from './CurrentList'
 import RegularsPanel from './RegularsPanel'
 
-const OFFLINE_QUEUE_KEY = 'offlineQueue'
+const CACHE_KEYS = {
+  currentList: 'currentList',
+  listItems: 'listItems',
+  categories: 'categories',
+  allItems: 'allItems',
+}
 
-function addToOfflineQueue(action) {
-  const existing = localStorage.getItem(OFFLINE_QUEUE_KEY)
-  const queue = existing ? JSON.parse(existing) : []
+function readCachedJson(key, fallback) {
+  try {
+    const cached = localStorage.getItem(key)
+    return cached ? JSON.parse(cached) : fallback
+  } catch {
+    return fallback
+  }
+}
 
-  queue.push({
-    ...action,
-    id: Date.now(),
-  })
-
-  localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue))
+function writeCachedJson(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // ignore localStorage write errors
+  }
 }
 
 function App() {
   const [session, setSession] = useState(null)
+  const [isOffline, setIsOffline] = useState(!navigator.onLine)
   const [error, setError] = useState(null)
   const [currentList, setCurrentList] = useState(null)
   const [listItems, setListItems] = useState([])
@@ -82,29 +93,63 @@ function App() {
   const [addingRegulars, setAddingRegulars] = useState(false)
 
   useEffect(() => {
+    function updateOnlineStatus() {
+      setIsOffline(!navigator.onLine)
+    }
+
+    window.addEventListener('online', updateOnlineStatus)
+    window.addEventListener('offline', updateOnlineStatus)
+
+    return () => {
+      window.removeEventListener('online', updateOnlineStatus)
+      window.removeEventListener('offline', updateOnlineStatus)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (isOffline) {
+      setSession((prev) => prev || { offline: true })
+      return
+    }
+
+    let isMounted = true
+
     async function getSession() {
-      const { data } = await supabase.auth.getSession()
-      setSession(data.session)
+      try {
+        const { data } = await supabase.auth.getSession()
+        if (isMounted) {
+          setSession(data.session)
+        }
+      } catch {
+        if (isMounted) {
+          setSession(null)
+        }
+      }
     }
 
     getSession()
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (isMounted) {
+        setSession(nextSession)
+      }
     })
 
-    return () => subscription.unsubscribe()
-  }, [])
+    return () => {
+      isMounted = false
+      subscription.unsubscribe()
+    }
+  }, [isOffline])
 
   useEffect(() => {
-    if (session) {
+    if (session || isOffline) {
       loadCurrentList()
       loadCategories()
       loadAllItems()
     }
-  }, [session])
+  }, [session, isOffline])
 
   useEffect(() => {
     if (listItems.length === 0) {
@@ -171,6 +216,16 @@ function App() {
   }, [allItems, listItems])
 
   async function loadCurrentList() {
+    if (isOffline) {
+      const cachedList = readCachedJson(CACHE_KEYS.currentList, null)
+      const cachedItems = readCachedJson(CACHE_KEYS.listItems, [])
+
+      setCurrentList(cachedList)
+      setListItems(Array.isArray(cachedItems) ? cachedItems : [])
+      setError(cachedList ? 'Offline mode: showing last saved list.' : null)
+      return
+    }
+
     try {
       const { data, error } = await supabase
         .from('shopping_lists')
@@ -183,36 +238,32 @@ function App() {
       }
 
       setCurrentList(data)
-      localStorage.setItem('currentList', JSON.stringify(data))
+      writeCachedJson(CACHE_KEYS.currentList, data)
       setError(null)
 
       if (data) {
         await loadListItems(data.id)
       } else {
         setListItems([])
+        writeCachedJson(CACHE_KEYS.listItems, [])
       }
-    } catch (_error) {
-      const cached = localStorage.getItem('currentList')
+    } catch {
+      const cachedList = readCachedJson(CACHE_KEYS.currentList, null)
+      const cachedItems = readCachedJson(CACHE_KEYS.listItems, [])
 
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached)
-          setCurrentList(parsed)
-          setError('Offline mode: showing last saved list.')
-          if (parsed?.id) {
-            await loadListItems(parsed.id)
-          }
-          return
-        } catch {
-          // ignore parse errors
-        }
-      }
-
-      setError('Offline and no cached current list available.')
+      setCurrentList(cachedList)
+      setListItems(Array.isArray(cachedItems) ? cachedItems : [])
+      setError(cachedList ? 'Offline mode: showing last saved list.' : 'Unable to load shopping list.')
     }
   }
 
   async function loadListItems(shoppingListId) {
+    if (isOffline) {
+      const cachedItems = readCachedJson(CACHE_KEYS.listItems, [])
+      setListItems(Array.isArray(cachedItems) ? cachedItems : [])
+      return
+    }
+
     try {
       const { data, error } = await supabase
         .from('shopping_list_items')
@@ -246,112 +297,95 @@ function App() {
         }))
 
       setListItems(processedItems)
-      localStorage.setItem('listItems', JSON.stringify(processedItems))
+      writeCachedJson(CACHE_KEYS.listItems, processedItems)
       setError(null)
-    } catch (_error) {
-      const cached = localStorage.getItem('listItems')
-
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached)
-          setListItems(parsed)
-          setError('Offline mode: showing last saved list.')
-          return
-        } catch {
-          // ignore parse errors
-        }
-      }
-
-      setError('Offline and no cached list available.')
+    } catch {
+      const cachedItems = readCachedJson(CACHE_KEYS.listItems, [])
+      setListItems(Array.isArray(cachedItems) ? cachedItems : [])
+      setError('Offline mode: showing last saved list.')
     }
   }
 
   async function loadCategories() {
-    const { data, error } = await supabase
-      .from('categories')
-      .select(`
-        id,
-        name,
-        sort_order
-      `)
-      .order('sort_order', { ascending: true })
-      .order('name', { ascending: true })
-
-    if (error) {
-      const cached = localStorage.getItem('categories')
-
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached)
-          setCategories(parsed)
-          setEditMessage('Offline mode: showing last saved categories.')
-          return
-        } catch {
-          // ignore parse errors
-        }
-      }
-
-      setEditMessage(`Error loading categories: ${error.message}`)
+    if (isOffline) {
+      const cachedCategories = readCachedJson(CACHE_KEYS.categories, [])
+      setCategories(Array.isArray(cachedCategories) ? cachedCategories : [])
       return
     }
 
-    const processedCategories =
-      (data || []).map((category) => ({
-        ...category,
-        draftName: category.name ?? '',
-        draftSortOrder:
-          category.sort_order === null || category.sort_order === undefined
-            ? ''
-            : String(category.sort_order),
-      }))
+    try {
+      const { data, error } = await supabase
+        .from('categories')
+        .select(`
+          id,
+          name,
+          sort_order
+        `)
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true })
 
-    setCategories(processedCategories)
-    localStorage.setItem('categories', JSON.stringify(processedCategories))
+      if (error) {
+        throw error
+      }
+
+      const processedCategories =
+        (data || []).map((category) => ({
+          ...category,
+          draftName: category.name ?? '',
+          draftSortOrder:
+            category.sort_order === null || category.sort_order === undefined
+              ? ''
+              : String(category.sort_order),
+        }))
+
+      setCategories(processedCategories)
+      writeCachedJson(CACHE_KEYS.categories, processedCategories)
+    } catch {
+      const cachedCategories = readCachedJson(CACHE_KEYS.categories, [])
+      setCategories(Array.isArray(cachedCategories) ? cachedCategories : [])
+    }
   }
 
   async function loadAllItems() {
-    const { data, error } = await supabase
-      .from('items')
-      .select(`
-        id,
-        name,
-        category_id,
-        regular,
-        default_quantity,
-        default_note
-      `)
-
-    if (error) {
-      const cached = localStorage.getItem('allItems')
-
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached)
-          setAllItems(parsed)
-          setEditMessage('Offline mode: showing last saved items.')
-          return
-        } catch {
-          // ignore parse errors
-        }
-      }
-
-      setEditMessage(`Error loading items: ${error.message}`)
+    if (isOffline) {
+      const cachedItems = readCachedJson(CACHE_KEYS.allItems, [])
+      setAllItems(Array.isArray(cachedItems) ? cachedItems : [])
       return
     }
 
-    const processedItems =
-      (data || []).map((item) => ({
-        ...item,
-        draftName: item.name ?? '',
-        draftCategoryId:
-          item.category_id === null || item.category_id === undefined
-            ? ''
-            : String(item.category_id),
-        draftRegular: !!item.regular,
-      }))
+    try {
+      const { data, error } = await supabase
+        .from('items')
+        .select(`
+          id,
+          name,
+          category_id,
+          regular,
+          default_quantity,
+          default_note
+        `)
 
-    setAllItems(processedItems)
-    localStorage.setItem('allItems', JSON.stringify(processedItems))
+      if (error) {
+        throw error
+      }
+
+      const processedItems =
+        (data || []).map((item) => ({
+          ...item,
+          draftName: item.name ?? '',
+          draftCategoryId:
+            item.category_id === null || item.category_id === undefined
+              ? ''
+              : String(item.category_id),
+          draftRegular: !!item.regular,
+        }))
+
+      setAllItems(processedItems)
+      writeCachedJson(CACHE_KEYS.allItems, processedItems)
+    } catch {
+      const cachedItems = readCachedJson(CACHE_KEYS.allItems, [])
+      setAllItems(Array.isArray(cachedItems) ? cachedItems : [])
+    }
   }
 
   async function refreshReferenceData() {
@@ -360,52 +394,82 @@ function App() {
   }
 
   async function loadUnavailableItems() {
-    setUnavailableItemsLoading(true)
-
-    const { data, error } = await supabase
-      .from('unavailable_items')
-      .select(`
-        id,
-        item_id,
-        quantity,
-        created_at,
-        items (
-          id,
-          name
-        )
-      `)
-      .order('created_at', { ascending: false })
-
-    setUnavailableItemsLoading(false)
-
-    if (error) {
-      setUnavailableItemsMessage(`Error loading unavailable items: ${error.message}`)
+    if (isOffline) {
+      setUnavailableItems([])
+      setUnavailableItemsMessage('Offline mode: read only')
+      setUnavailableItemsLoading(false)
       return
     }
 
-    setUnavailableItems(data || [])
+    setUnavailableItemsLoading(true)
+
+    try {
+      const { data, error } = await supabase
+        .from('unavailable_items')
+        .select(`
+          id,
+          item_id,
+          quantity,
+          created_at,
+          items (
+            id,
+            name
+          )
+        `)
+        .order('created_at', { ascending: false })
+
+      setUnavailableItemsLoading(false)
+
+      if (error) {
+        throw error
+      }
+
+      setUnavailableItems(data || [])
+      setUnavailableItemsMessage(null)
+    } catch {
+      setUnavailableItemsLoading(false)
+      setUnavailableItems([])
+      setUnavailableItemsMessage('Unable to load unavailable items.')
+    }
   }
 
   async function handleLogin(e) {
     e.preventDefault()
     setError(null)
 
+    if (isOffline) {
+      setError('Offline mode: sign in unavailable.')
+      return
+    }
+
     const formData = new FormData(e.target)
     const email = formData.get('email')
     const password = formData.get('password')
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
 
-    if (error) {
-      setError(`Login failed: ${error.message}`)
+      if (error) {
+        setError(`Login failed: ${error.message}`)
+      }
+    } catch {
+      setError('Login unavailable right now.')
     }
   }
 
   async function handleLogout() {
-    await supabase.auth.signOut()
+    if (isOffline) {
+      return
+    }
+
+    try {
+      await supabase.auth.signOut()
+    } catch {
+      return
+    }
 
     setCurrentList(null)
     setListItems([])
@@ -466,6 +530,10 @@ function App() {
   }
 
   async function handleOpenAddItem() {
+    if (isOffline) {
+      return
+    }
+
     setShowShoppingMode(false)
     setShowUnavailableItems(false)
     setShowEditPanel(false)
@@ -501,6 +569,11 @@ function App() {
   }
 
   async function handleOpenEditPanel(section = 'currentList') {
+    if (isOffline) {
+      setEditMessage('Offline mode: read only')
+      return
+    }
+
     setShowShoppingMode(false)
     setShowUnavailableItems(false)
     setShowAddItem(false)
@@ -551,6 +624,10 @@ function App() {
   }
 
   async function handleOpenUnavailableItems() {
+    if (isOffline) {
+      return
+    }
+
     setShowUnavailableItems(true)
     setShowShoppingMode(false)
     setShowAddItem(false)
@@ -570,6 +647,10 @@ function App() {
   }
 
   async function handleOpenRegulars() {
+    if (isOffline) {
+      return
+    }
+
     setShowRegulars(true)
     setShowShoppingMode(false)
     setShowUnavailableItems(false)
@@ -616,6 +697,11 @@ function App() {
   }
 
   async function handleAddSelectedRegulars() {
+    if (isOffline) {
+      setRegularsMessage('Offline mode: read only')
+      return
+    }
+
     if (!currentList) {
       setRegularsMessage('No current shopping list found.')
       return
@@ -673,6 +759,12 @@ function App() {
   }
 
   async function handleAddItem(e) {
+    if (isOffline) {
+      e.preventDefault()
+      setAddItemMessage('Offline mode: read only')
+      return
+    }
+
     e.preventDefault()
 
     if (!currentList) {
@@ -719,25 +811,6 @@ function App() {
       (item) => String(item.id) === String(addItemId)
     )
 
-    const localItem = {
-      id: Date.now(),
-      item_id: newItem.item_id,
-      quantity_required: newItem.quantity_required,
-      quantity_bought: 0,
-      note: null,
-      unavailable: false,
-      items: {
-        id: addedItem?.id ?? newItem.item_id,
-        name: addedItem?.name || 'Item',
-        category_id: addedItem?.category_id ?? null,
-      },
-      draftQuantity: String(newItem.quantity_required),
-    }
-
-    const updatedList = [...listItems, localItem]
-    setListItems(updatedList)
-    localStorage.setItem('listItems', JSON.stringify(updatedList))
-
     try {
       const { error } = await supabase
         .from('shopping_list_items')
@@ -749,6 +822,8 @@ function App() {
         throw error
       }
 
+      await loadListItems(currentList.id)
+
       setAddItemMessage(
         addedItem
           ? `"${addedItem.name}" added to the list.`
@@ -756,23 +831,19 @@ function App() {
       )
       setAddItemId('')
       setAddQuantity('1')
-      return
-    } catch (_error) {
+    } catch {
       setAddItemLoading(false)
-
-      addToOfflineQueue({
-        type: 'ADD_ITEM',
-        payload: newItem,
-      })
-
-      setAddItemMessage('Offline: item added locally and queued for sync.')
-      setAddItemId('')
-      setAddQuantity('1')
-      return
+      setAddItemMessage('Unable to add item right now.')
     }
   }
 
   async function handleQuickCreateItem(e) {
+    if (isOffline) {
+      e.preventDefault()
+      setAddItemMessage('Offline mode: read only')
+      return
+    }
+
     e.preventDefault()
     setAddItemMessage(null)
 
@@ -831,6 +902,12 @@ function App() {
   }
 
   async function handleCreateNewItem(e) {
+    if (isOffline) {
+      e.preventDefault()
+      setEditMessage('Offline mode: read only')
+      return
+    }
+
     e.preventDefault()
     setEditMessage(null)
 
@@ -896,6 +973,12 @@ function App() {
   }
 
   async function handleCreateCategory(e) {
+    if (isOffline) {
+      e.preventDefault()
+      setEditMessage('Offline mode: read only')
+      return
+    }
+
     e.preventDefault()
     setEditMessage(null)
 
@@ -944,6 +1027,11 @@ function App() {
   }
 
   async function handleSaveCategory(category) {
+    if (isOffline) {
+      setEditMessage('Offline mode: read only')
+      return
+    }
+
     setEditMessage(null)
 
     const trimmedName = category.draftName.trim()
@@ -998,6 +1086,11 @@ function App() {
   }
 
   async function handleDeleteCategory(category) {
+    if (isOffline) {
+      setEditMessage('Offline mode: read only')
+      return
+    }
+
     setEditMessage(null)
 
     const confirmed = window.confirm(`Delete category "${category.name}"?`)
@@ -1057,6 +1150,11 @@ function App() {
   }
 
   async function handleSaveListItemQuantity(listItem) {
+    if (isOffline) {
+      setEditMessage('Offline mode: read only')
+      return
+    }
+
     setEditMessage(null)
 
     const quantityNumber = Number(listItem.draftQuantity)
@@ -1090,6 +1188,11 @@ function App() {
   }
 
   async function handleRemoveListItem(listItem) {
+    if (isOffline) {
+      setEditMessage('Offline mode: read only')
+      return
+    }
+
     if (!currentList) {
       setEditMessage('No current shopping list found.')
       return
@@ -1135,6 +1238,11 @@ function App() {
   }
 
   async function handleSaveItem(item) {
+    if (isOffline) {
+      setEditMessage('Offline mode: read only')
+      return
+    }
+
     setEditMessage(null)
 
     const trimmedName = item.draftName.trim()
@@ -1187,6 +1295,11 @@ function App() {
   }
 
   async function handleDeleteItem(item) {
+    if (isOffline) {
+      setEditMessage('Offline mode: read only')
+      return
+    }
+
     setEditMessage(null)
 
     const confirmed = window.confirm(`Delete item "${item.name}" from saved items?`)
@@ -1254,7 +1367,13 @@ function App() {
     )
 
     setListItems(updatedList)
-    localStorage.setItem('listItems', JSON.stringify(updatedList))
+    writeCachedJson(CACHE_KEYS.listItems, updatedList)
+
+    if (isOffline) {
+      setUpdatingBoughtListItemId(null)
+      setShoppingModeMessage('Offline: changes saved locally')
+      return
+    }
 
     try {
       const { error } = await supabase
@@ -1271,10 +1390,9 @@ function App() {
       }
 
       await loadListItems(currentList.id)
-    } catch (_error) {
+    } catch {
       setUpdatingBoughtListItemId(null)
-      setShoppingModeMessage('Offline: change saved locally.')
-      return
+      setShoppingModeMessage('Unable to update item right now.')
     }
   }
 
@@ -1293,6 +1411,11 @@ function App() {
   }
 
   async function handleFinishShopping() {
+    if (isOffline) {
+      setShoppingModeMessage('Offline mode: read only')
+      return
+    }
+
     if (!currentList) {
       setShoppingModeMessage('No current shopping list found.')
       return
@@ -1354,6 +1477,11 @@ function App() {
   }
 
   async function handleAddUnavailableItemToCurrentList(unavailableItem) {
+    if (isOffline) {
+      setUnavailableItemsMessage('Offline mode: read only')
+      return
+    }
+
     if (!currentList) {
       setUnavailableItemsMessage('No current shopping list found.')
       return
@@ -1428,6 +1556,11 @@ function App() {
   }
 
   async function handleRemoveUnavailableItem(unavailableItem) {
+    if (isOffline) {
+      setUnavailableItemsMessage('Offline mode: read only')
+      return
+    }
+
     setAddingUnavailableItemId(unavailableItem.id)
     setUnavailableItemsMessage(null)
 
@@ -1449,6 +1582,11 @@ function App() {
   }
 
   async function handleCreateNewList() {
+    if (isOffline) {
+      setError('Offline mode: read only')
+      return
+    }
+
     const confirmed = window.confirm('Start a new empty list?')
 
     if (!confirmed) {
@@ -1825,7 +1963,7 @@ function App() {
   const showCurrentList =
     !showShoppingMode && !showUnavailableItems && !showAddItem && !showEditPanel && !showRegulars
 
-  if (!session) {
+  if (!session && !isOffline) {
     return (
       <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
         <h1>Shopping App</h1>
@@ -1861,7 +1999,7 @@ function App() {
           marginBottom: '20px',
         }}
       >
-        <button onClick={handleLogout}>Sign out</button>
+        <button onClick={handleLogout} disabled={isOffline}>Sign out</button>
       </div>
 
       <div
@@ -1886,6 +2024,7 @@ function App() {
         </button>
         <button
           onClick={handleOpenAddItem}
+          disabled={isOffline}
           style={{
             minHeight: '52px',
             padding: '12px',
@@ -1898,6 +2037,7 @@ function App() {
         </button>
         <button
           onClick={handleOpenRegulars}
+          disabled={isOffline}
           style={{
             minHeight: '52px',
             padding: '12px',
@@ -1910,6 +2050,7 @@ function App() {
         </button>
         <button
           onClick={handleOpenUnavailableItems}
+          disabled={isOffline}
           style={{
             minHeight: '52px',
             padding: '12px',
@@ -1922,6 +2063,7 @@ function App() {
         </button>
         <button
           onClick={() => handleOpenEditPanel('currentList')}
+          disabled={isOffline}
           style={{
             minHeight: '52px',
             padding: '12px',
@@ -1934,6 +2076,7 @@ function App() {
         </button>
         <button
           onClick={handleCreateNewList}
+          disabled={isOffline}
           style={{
             minHeight: '52px',
             padding: '12px',
@@ -1958,6 +2101,12 @@ function App() {
           Print
         </button>
       </div>
+
+      {isOffline && (
+        <p style={{ marginTop: 0, marginBottom: '20px' }}>
+          Offline mode: showing cached data only
+        </p>
+      )}
 
       {showShoppingMode && (
         <ShoppingMode

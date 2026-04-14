@@ -752,7 +752,7 @@ function App() {
         payload: newItem,
       })
 
-      setAddItemMessage('Offline: item added locally and queued for sync.')
+      setAddItemMessage('CATCH PATH HIT 12345')
       setAddItemId('')
       setAddQuantity('1')
       return

@@ -1253,21 +1253,26 @@ function App() {
     setListItems(updatedList)
     localStorage.setItem('listItems', JSON.stringify(updatedList))
 
-    const { error } = await supabase
-      .from('shopping_list_items')
-      .update({
-        quantity_bought: safeNextQuantityBought,
-      })
-      .eq('id', listItem.id)
+    try {
+      const { error } = await supabase
+        .from('shopping_list_items')
+        .update({
+          quantity_bought: safeNextQuantityBought,
+        })
+        .eq('id', listItem.id)
 
-    setUpdatingBoughtListItemId(null)
+      setUpdatingBoughtListItemId(null)
 
-    if (error) {
+      if (error) {
+        throw error
+      }
+
+      await loadListItems(currentList.id)
+    } catch (_error) {
+      setUpdatingBoughtListItemId(null)
       setShoppingModeMessage('Offline: change saved locally.')
       return
     }
-
-    await loadListItems(currentList.id)
   }
 
   async function handleBoughtOne(listItem) {

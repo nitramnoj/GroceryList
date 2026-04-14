@@ -1885,7 +1885,7 @@ function App() {
             borderRadius: '10px',
           }}
         >
-          Add Item
+          Add Item LIVE TEST 777
         </button>
         <button
           onClick={handleOpenRegulars}

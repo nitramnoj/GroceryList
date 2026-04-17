@@ -12,6 +12,7 @@ const CACHE_KEYS = {
   listItems: 'listItems',
   categories: 'categories',
   allItems: 'allItems',
+  pendingBoughtUpdates: 'pendingBoughtUpdates',
 }
 
 function readCachedJson(key, fallback) {
@@ -29,6 +30,31 @@ function writeCachedJson(key, value) {
   } catch {
     // ignore localStorage write errors
   }
+}
+
+function readPendingBoughtUpdates() {
+  const pending = readCachedJson(CACHE_KEYS.pendingBoughtUpdates, [])
+  return Array.isArray(pending) ? pending : []
+}
+
+function writePendingBoughtUpdates(updates) {
+  writeCachedJson(CACHE_KEYS.pendingBoughtUpdates, updates)
+}
+
+function queuePendingBoughtUpdate(listItemId, quantityBought) {
+  const pending = readPendingBoughtUpdates()
+  const next = pending.filter((update) => update.listItemId !== listItemId)
+
+  next.push({
+    listItemId,
+    quantity_bought: quantityBought,
+  })
+
+  writePendingBoughtUpdates(next)
+}
+
+function clearPendingBoughtUpdates() {
+  writePendingBoughtUpdates([])
 }
 
 function App() {
@@ -215,6 +241,33 @@ function App() {
     })
   }, [allItems, listItems])
 
+  async function syncPendingBoughtUpdates() {
+    if (isOffline) {
+      return
+    }
+
+    const pending = readPendingBoughtUpdates()
+
+    if (pending.length === 0) {
+      return
+    }
+
+    for (const update of pending) {
+      const { error } = await supabase
+        .from('shopping_list_items')
+        .update({
+          quantity_bought: update.quantity_bought,
+        })
+        .eq('id', update.listItemId)
+
+      if (error) {
+        throw error
+      }
+    }
+
+    clearPendingBoughtUpdates()
+  }
+
   async function loadCurrentList() {
     if (isOffline) {
       const cachedList = readCachedJson(CACHE_KEYS.currentList, null)
@@ -227,6 +280,8 @@ function App() {
     }
 
     try {
+      await syncPendingBoughtUpdates()
+
       const { data, error } = await supabase
         .from('shopping_lists')
         .select('*')
@@ -1370,6 +1425,7 @@ function App() {
     writeCachedJson(CACHE_KEYS.listItems, updatedList)
 
     if (isOffline) {
+      queuePendingBoughtUpdate(listItem.id, safeNextQuantityBought)
       setUpdatingBoughtListItemId(null)
       setShoppingModeMessage('Offline: changes saved locally')
       return
@@ -1391,8 +1447,9 @@ function App() {
 
       await loadListItems(currentList.id)
     } catch {
+      queuePendingBoughtUpdate(listItem.id, safeNextQuantityBought)
       setUpdatingBoughtListItemId(null)
-      setShoppingModeMessage('Unable to update item right now.')
+      setShoppingModeMessage('Unable to update item right now. Change saved locally and will sync when back online.')
     }
   }
 

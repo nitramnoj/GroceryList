@@ -1,0 +1,1 @@
+{"name":"Shopping List App","short_name":"Shopping","description":"Offline shopping list","start_url":"/GroceryList/","display":"standalone","background_color":"#ffffff","theme_color":"#ffffff","lang":"en","scope":"/GroceryList/","id":"/GroceryList/","icons":[{"src":"/favicon.svg","sizes":"any","type":"image/svg+xml"}]}

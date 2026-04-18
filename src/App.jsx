@@ -320,6 +320,8 @@ function App() {
     }
 
     try {
+      await syncPendingBoughtUpdates()
+
       const { data, error } = await supabase
         .from('shopping_list_items')
         .select(`
